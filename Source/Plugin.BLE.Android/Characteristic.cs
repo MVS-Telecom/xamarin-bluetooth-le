@@ -10,6 +10,7 @@ using Plugin.BLE.Abstractions.Exceptions;
 using Plugin.BLE.Android.CallbackEventArgs;
 using Plugin.BLE.Extensions;
 using Plugin.BLE.Abstractions.Utils;
+using System.Threading;
 
 namespace Plugin.BLE.Android
 {
@@ -43,71 +44,77 @@ namespace Plugin.BLE.Android
             return Task.FromResult<IReadOnlyList<IDescriptor>>(_nativeCharacteristic.Descriptors.Select(item => new Descriptor(item, _gatt, _gattCallback, this)).Cast<IDescriptor>().ToList());
         }
 
-        protected override async Task<byte[]> ReadNativeAsync()
+        protected override Task<byte[]> ReadNativeAsync()
         {
-            return await TaskBuilder.FromEvent<byte[], EventHandler<CharacteristicReadCallbackEventArgs>, EventHandler>(
-                execute: ReadInternal,
-                getCompleteHandler: (complete, reject) => ((sender, args) =>
-                {
-                    if (args.Characteristic.Uuid == _nativeCharacteristic.Uuid)
+            return DoSerialAction(() =>
+            {
+                return TaskBuilder.FromEvent<byte[], EventHandler<CharacteristicReadCallbackEventArgs>, EventHandler>(
+                    execute: ReadInternal,
+                    getCompleteHandler: (complete, reject) => ((sender, args) =>
                     {
-                        complete(args.Characteristic.GetValue());
-                    }
-                }),
-                subscribeComplete: handler => _gattCallback.CharacteristicValueUpdated += handler,
-                unsubscribeComplete: handler => _gattCallback.CharacteristicValueUpdated -= handler,
-                getRejectHandler: reject => ((sender, args) =>
-                {
-                    reject(new Exception($"Device '{Service.Device.Id}' disconnected while reading characteristic with {Id}."));
-                }),
-                subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
-                unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler);
-
+                        if (args.Characteristic.Uuid == _nativeCharacteristic.Uuid)
+                        {
+                            complete(args.Characteristic.GetValue());
+                        }
+                    }),
+                    subscribeComplete: handler => _gattCallback.CharacteristicValueUpdated += handler,
+                    unsubscribeComplete: handler => _gattCallback.CharacteristicValueUpdated -= handler,
+                    getRejectHandler: reject => ((sender, args) =>
+                    {
+                        reject(new Exception($"Device '{Service.Device.Id}' disconnected while reading characteristic with {Id}."));
+                    }),
+                    subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
+                    unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler);
+            });
         }
+
 
         void ReadInternal()
         {
             if (!_gatt.ReadCharacteristic(_nativeCharacteristic))
             {
-                throw new CharacteristicReadException("BluetoothGattCharacteristic.readCharacteristic returned FALSE");
+                throw new CharacteristicReadException($"BluetoothGattCharacteristic.readCharacteristic `{Id}` returned FALSE");
             }
         }
 
-        protected override async Task<bool> WriteNativeAsync(byte[] data, CharacteristicWriteType writeType)
+        protected override Task<bool> WriteNativeAsync(byte[] data, CharacteristicWriteType writeType)
         {
-            _nativeCharacteristic.WriteType = writeType.ToNative();
+            return DoSerialAction(() =>
+            {
+                _nativeCharacteristic.WriteType = writeType.ToNative();
 
-            return await TaskBuilder.FromEvent<bool, EventHandler<CharacteristicWriteCallbackEventArgs>, EventHandler>(
-                execute: () => InternalWrite(data),
-                getCompleteHandler: (complete, reject) => ((sender, args) =>
-                   {
-                       if (args.Characteristic.Uuid == _nativeCharacteristic.Uuid)
+                return TaskBuilder.FromEvent<bool, EventHandler<CharacteristicWriteCallbackEventArgs>, EventHandler>(
+                    execute: () => InternalWrite(data),
+                    getCompleteHandler: (complete, reject) => ((sender, args) =>
                        {
-                           complete(args.Exception == null);
-                       }
+                           if (args.Characteristic.Uuid == _nativeCharacteristic.Uuid)
+                           {
+                               complete(args.Exception == null);
+                           }
+                       }),
+                   subscribeComplete: handler => _gattCallback.CharacteristicValueWritten += handler,
+                   unsubscribeComplete: handler => _gattCallback.CharacteristicValueWritten -= handler,
+                   getRejectHandler: reject => ((sender, args) =>
+                   {
+                       reject(new Exception($"Device '{Service.Device.Id}' disconnected while writing characteristic with {Id}."));
                    }),
-               subscribeComplete: handler => _gattCallback.CharacteristicValueWritten += handler,
-               unsubscribeComplete: handler => _gattCallback.CharacteristicValueWritten -= handler,
-               getRejectHandler: reject => ((sender, args) =>
-               {
-                   reject(new Exception($"Device '{Service.Device.Id}' disconnected while writing characteristic with {Id}."));
-               }),
-               subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
-               unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler);
+                   subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
+                   unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler);
+            });
         }
 
         private void InternalWrite(byte[] data)
         {
             if (!_nativeCharacteristic.SetValue(data))
             {
-                throw new CharacteristicReadException("Gatt characteristic set value FAILED.");
+                throw new CharacteristicReadException($"Gatt characteristic `{Id}` set value FAILED.");
             }
 
             Trace.Message("Write {0}", Id);
 
             if (!_gatt.WriteCharacteristic(_nativeCharacteristic))
             {
-                throw new CharacteristicReadException("Gatt write characteristic FAILED.");
+                throw new CharacteristicReadException($"Gatt write characteristic `{Id}` FAILED.");
             }
         }
 
@@ -188,5 +195,34 @@ namespace Plugin.BLE.Android
                 ValueUpdated?.Invoke(this, new CharacteristicUpdatedEventArgs(this));
             }
         }
+
+
+        /// <summary>
+        /// Read/write lock for ALL GATTs (for serial reading/writing)
+        /// </summary>
+        private readonly static SemaphoreSlim gattLock = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// Do GATT action (read / write) serial
+        /// </summary>
+        /// <returns></returns>
+        private static async Task<T> DoSerialAction<T>(Func<Task<T>> action)
+        {
+#if DEBUG
+            if (gattLock.CurrentCount == 0)
+                Trace.Message($"Gatt already in READ/WRITE state. Waiting for complete before next action");
+#endif
+
+            try
+            {
+                await gattLock.WaitAsync();
+                return await action();
+            }
+            finally
+            {
+                gattLock.Release();
+            }
+        }
+
     }
 }
