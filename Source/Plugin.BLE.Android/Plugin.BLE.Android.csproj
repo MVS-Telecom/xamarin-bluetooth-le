@@ -23,7 +23,7 @@
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
     <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <DefineConstants>TRACE;DEBUG;ANDROID</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
@@ -70,6 +70,7 @@
     <Compile Include="Service.cs" />
     <Compile Include="CallbackEventArgs\DescriptorCallbackEventArgs.cs" />
     <Compile Include="CallbackEventArgs\MtuRequestCallbackEventArgs.cs" />
+    <Compile Include="Util\ThreadWorker.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Plugin.BLE.Abstractions\Plugin.BLE.Abstractions.csproj">
