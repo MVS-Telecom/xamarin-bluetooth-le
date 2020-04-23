@@ -23,7 +23,7 @@ namespace Plugin.BLE.Android
     {
         private readonly Adapter _adapter;
         private readonly Device _device;
-
+        private readonly ThreadWorker worker;
         public event EventHandler<ServicesDiscoveredCallbackEventArgs> ServicesDiscovered;
         public event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueUpdated;
         public event EventHandler<CharacteristicWriteCallbackEventArgs> CharacteristicValueWritten;
@@ -33,21 +33,11 @@ namespace Plugin.BLE.Android
         public event EventHandler<DescriptorCallbackEventArgs> DescriptorValueRead;
         public event EventHandler<MtuRequestCallbackEventArgs> MtuRequested;
 
-
-
-        private static ThreadWorker worker;
-        private static ThreadWorker GetWorker()
-        {
-            lock (typeof(GattCallback))
-                return worker = worker ?? new ThreadWorker("GattCallback thread");
-        }
-
-
         public GattCallback(Adapter adapter, Device device)
         {
             _adapter = adapter;
             _device = device;
-            worker = GetWorker();
+            worker = new ThreadWorker("GattCallback thread");
         }
 
         public override void OnConnectionStateChange(BluetoothGatt gatt, GattStatus status, ProfileState newState)
