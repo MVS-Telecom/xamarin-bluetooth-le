@@ -206,4 +206,4 @@ FakesAssemblies/
 /.build/PluginNugetTest/testbuild
 .build/tools/
 tools/
-Source/Plugin.BLE.Android/Resources/Resource.Designer.cs
+Resource.Designer.cs
